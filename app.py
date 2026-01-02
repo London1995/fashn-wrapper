@@ -22,6 +22,11 @@ HEADERS = {"Authorization": f"Bearer {FASHN_API_KEY}", "Content-Type": "applicat
 STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "/tmp/storage")).resolve()
 
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR = (STORAGE_DIR / "models").resolve()
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+MODELS_INDEX_PATH = (STORAGE_DIR / "models.json").resolve()
+
 
 # If running behind a proxy/Cloudflare, set PUBLIC_BASE_URL to your externally reachable origin
 # e.g. https://api.yourdomain.com
@@ -62,6 +67,8 @@ app = FastAPI(title="Thin Wrapper for FASHN (Local Upload MVP)", version="0.2.0"
 
 # Serve uploaded files at /files/<filename>
 app.mount("/files", StaticFiles(directory=str(STORAGE_DIR)), name="files")
+app.mount("/files/models", StaticFiles(directory=str(MODELS_DIR)), name="models")
+
 
 
 # ---------------------------
@@ -73,6 +80,18 @@ class UploadResponse(BaseModel):
     filename: str
     bytes: int
 
+
+class ModelRegisterResponse(BaseModel):
+    model_id: str
+    url: HttpUrl
+    filename: str
+    bytes: int
+
+
+class ModelInfo(BaseModel):
+    model_id: str
+    url: HttpUrl
+    filename: str
 
 class RenderPDPRequest(BaseModel):
     # Accept either URLs OR file_ids returned by /upload
