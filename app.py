@@ -93,13 +93,12 @@ class ModelInfo(BaseModel):
     url: HttpUrl
     filename: str
 
+
 class RenderPDPRequest(BaseModel):
-   class RenderPDPRequest(BaseModel):
     # Provide either model_id OR model_image
     model_id: Optional[str] = None
     model_image: Optional[Union[HttpUrl, str]] = None
     garment_image: Union[HttpUrl, str]
-
 
     garment_type: Literal["top", "bottom", "full_body"]
     preset: Literal["PDP_STUDIO_SPRING_V1", "PDP_STUDIO_SPRING_V1_EDIT"] = "PDP_STUDIO_SPRING_V1"
@@ -111,9 +110,12 @@ class RenderPDPRequest(BaseModel):
     @field_validator("model_image", "garment_image")
     @classmethod
     def non_empty(cls, v):
+        if v is None:
+            return v
         if isinstance(v, str) and not v.strip():
             raise ValueError("must not be empty")
         return v
+ 
 
 
 class RenderResponse(BaseModel):
@@ -352,13 +354,14 @@ def render_pdp(request: Request, req: RenderPDPRequest):
         raise HTTPException(status_code=400, detail="Unknown preset")
 
     if req.model_id:
-    model_url = resolve_model_id_to_url(request, req.model_id)
-elif req.model_image is not None:
-    model_url = resolve_to_url(request, req.model_image)
-else:
-    raise HTTPException(status_code=400, detail="Provide either model_id or model_image")
+        model_url = resolve_model_id_to_url(request, req.model_id)
+    elif req.model_image is not None:
+        model_url = resolve_to_url(request, req.model_image)
+    else:
+        raise HTTPException(status_code=400, detail="Provide either model_id or model_image")
 
     garment_url = resolve_to_url(request, req.garment_image)
+
 
     # 1) Try-on
     tryon_payload = {
