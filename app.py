@@ -94,9 +94,12 @@ class ModelInfo(BaseModel):
     filename: str
 
 class RenderPDPRequest(BaseModel):
-    # Accept either URLs OR file_ids returned by /upload
-    model_image: Union[HttpUrl, str]
+   class RenderPDPRequest(BaseModel):
+    # Provide either model_id OR model_image
+    model_id: Optional[str] = None
+    model_image: Optional[Union[HttpUrl, str]] = None
     garment_image: Union[HttpUrl, str]
+
 
     garment_type: Literal["top", "bottom", "full_body"]
     preset: Literal["PDP_STUDIO_SPRING_V1", "PDP_STUDIO_SPRING_V1_EDIT"] = "PDP_STUDIO_SPRING_V1"
@@ -236,6 +239,75 @@ def pick_first_image_url(output: Any) -> Optional[str]:
             return imgs[0]
     return None
 
+def load_models_index() -> Dict[str, Dict[str, Any]]:
+    if MODELS_INDEX_PATH.exists():
+        import json
+        try:
+            return json.loads(MODELS_INDEX_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_models_index(index: Dict[str, Dict[str, Any]]) -> None:
+    import json
+    MODELS_INDEX_PATH.write_text(json.dumps(index, indent=2), encoding="utf-8")
+
+
+def next_model_id(index: Dict[str, Dict[str, Any]]) -> str:
+    nums = []
+    for k in index.keys():
+        if isinstance(k, str) and k.startswith("M") and k[1:].isdigit():
+            nums.append(int(k[1:]))
+    n = (max(nums) + 1) if nums else 1
+    return f"M{n:02d}"
+
+
+def save_model_upload(file: UploadFile) -> ModelRegisterResponse:
+    ext = safe_ext(file.filename or "")
+    if not ext:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {sorted(ALLOWED_EXTS)}")
+
+    index = load_models_index()
+    model_id = next_model_id(index)
+
+    out_name = f"{model_id}{ext}"
+    out_path = MODELS_DIR / out_name
+
+    total = 0
+    with out_path.open("wb") as f:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_FILE_BYTES:
+                out_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail=f"File too large. Max {MAX_FILE_BYTES} bytes.")
+            f.write(chunk)
+
+    index[model_id] = {"filename": out_name, "bytes": total}
+    save_models_index(index)
+
+    return ModelRegisterResponse(model_id=model_id, url="http://placeholder", filename=out_name, bytes=total)
+
+
+def resolve_model_id_to_url(request: Request, model_id: str) -> str:
+    index = load_models_index()
+    meta = index.get(model_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"Unknown model_id '{model_id}'")
+    filename = meta.get("filename")
+    if not filename:
+        raise HTTPException(status_code=404, detail=f"Model file missing for '{model_id}'")
+
+    path = MODELS_DIR / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Model file not found on disk for '{model_id}'")
+
+    base = public_base(request)
+    return f"{base}/files/models/{path.name}"
+
 
 # ---------------------------
 # Routes
@@ -251,6 +323,26 @@ def upload_image(request: Request, file: UploadFile = File(...)):
     base = public_base(request)
     saved.url = f"{base}/files/{saved.filename}"
     return saved
+@app.post("/models/register", response_model=ModelRegisterResponse)
+def register_model(request: Request, file: UploadFile = File(...)):
+    saved = save_model_upload(file)
+    base = public_base(request)
+    saved.url = f"{base}/files/models/{saved.filename}"
+    return saved
+
+
+@app.get("/models", response_model=list[ModelInfo])
+def list_models(request: Request):
+    base = public_base(request)
+    index = load_models_index()
+    out: list[ModelInfo] = []
+    for model_id, meta in sorted(index.items()):
+        filename = meta.get("filename")
+        if not filename:
+            continue
+        out.append(ModelInfo(model_id=model_id, filename=filename, url=f"{base}/files/models/{filename}"))
+    return out
+
 
 
 @app.post("/render/pdp", response_model=RenderResponse)
@@ -259,7 +351,13 @@ def render_pdp(request: Request, req: RenderPDPRequest):
     if not preset:
         raise HTTPException(status_code=400, detail="Unknown preset")
 
+    if req.model_id:
+    model_url = resolve_model_id_to_url(request, req.model_id)
+elif req.model_image is not None:
     model_url = resolve_to_url(request, req.model_image)
+else:
+    raise HTTPException(status_code=400, detail="Provide either model_id or model_image")
+
     garment_url = resolve_to_url(request, req.garment_image)
 
     # 1) Try-on
