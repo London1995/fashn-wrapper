@@ -19,7 +19,8 @@ if not FASHN_API_KEY:
 BASE_URL = os.getenv("FASHN_BASE_URL", "https://api.fashn.ai/v1")
 HEADERS = {"Authorization": f"Bearer {FASHN_API_KEY}", "Content-Type": "application/json"}
 
-STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "./storage")).resolve()
+STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "/tmp/storage")).resolve()
+
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 # If running behind a proxy/Cloudflare, set PUBLIC_BASE_URL to your externally reachable origin
